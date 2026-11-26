@@ -22,9 +22,16 @@ Mise à jour : 26 novembre 2026 — Claude Opus 5.5. Aucun secret dans ce fichie
 - Fenêtre « Recevoir mon ouvrage » (nom + e-mail), redirection dans le même onglet, page `#merci` (vérification serveur, boutons « Télécharger mon livre »), panier réglé en une fois.
 - Tests : serveur 10/10 (simulés), interface 28/28, carrousel 55/55, site 52/52.
 
+## E-mail de livraison (actif depuis le 26/11/2026)
+- Google Apps Script « Providence - Livraison des livres par e-mail » (compte silasgbavou@gmail.com), code : `saspay/apps-script/`.
+- Toutes les 10 minutes : `GET /api/envois` puis `POST /api/envois/fait` ; authentification par jeton d'identité Google vérifié par le serveur (variable `EMAIL_EXPEDITEUR`). Aucun secret partagé.
+- Essai complet réussi : commande fictive payée → e-mail reçu → page de remise → PDF téléchargé (262 358 octets, %PDF) → commande d'essai supprimée.
+
+## Choix du prestataire
+`data/config.json → vente.prestataire` : `saspay` (actif) ou `maketou`. Un seul mot à changer ; aussi modifiable dans Pages CMS.
+
 ## Reste à faire
 1. Mise en ligne de la branche (accord du propriétaire).
 2. Achat réel de faible montant par le propriétaire en mode essai → contrôle de la livraison.
-3. E-mail de livraison automatique (Brevo gratuit) : code prêt, clé non configurée.
 4. Activation de la carte bancaire auprès de SasPay (option).
 5. Bascule `actif: true`, puis retrait de Maketou après validation.
