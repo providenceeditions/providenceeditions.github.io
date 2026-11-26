@@ -78,3 +78,26 @@ test("webhook : signature valide acceptée, signature fausse / horodatage périm
   assert.equal(e.DB.raw.prepare("SELECT COUNT(*) n FROM commandes WHERE etat='payee'").get().n, 1);
 });
 test("santé : ne révèle aucun secret", async () => { const e = env(); const t = await (await W.fetch(req("/api/sante"), e, ctx)).text(); assert.ok(!t.includes("sk_test_x") && !t.includes("whsec")); });
+test("envois Gmail : jeton Google valide accepté, faux jeton / mauvaise adresse refusés, marquage unique", async () => {
+  const { privateKey, publicKey } = await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"]);
+  const jwk = { ...(await crypto.subtle.exportKey("jwk", publicKey)), kid: "k1" };
+  const b64u = o => Buffer.from(typeof o === "string" ? o : JSON.stringify(o)).toString("base64url");
+  const jeton = async (email, exp = Date.now() / 1000 + 300) => { const h = b64u({ alg: "RS256", kid: "k1" }), c = b64u({ iss: "https://accounts.google.com", email, email_verified: true, exp });
+    const sig = Buffer.from(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", privateKey, new TextEncoder().encode(h + "." + c))).toString("base64url"); return h + "." + c + "." + sig; };
+  const avant = globalThis.fetch;
+  globalThis.fetch = async (u, o) => String(u).includes("oauth2/v3/certs") ? new Response(JSON.stringify({ keys: [jwk] })) : avant(u, o);
+  const e = env(); e.EMAIL_EXPEDITEUR = "silasgbavou@gmail.com";
+  await payer(e); FAUX.statut = "PAID";
+  const c = e.DB.raw.prepare("SELECT * FROM commandes").get();
+  e.DB.raw.prepare("UPDATE commandes SET etat='payee', payee_le=? WHERE id=?").run(Date.now(), c.id);
+  const lister = async t => W.fetch(new Request("https://x/api/envois", { headers: { Authorization: "Bearer " + t } }), e, ctx);
+  assert.equal((await lister(await jeton("pirate@gmail.com"))).status, 403);
+  assert.equal((await lister(await jeton("silasgbavou@gmail.com", 1))).status, 403);
+  const t = await jeton("silasgbavou@gmail.com"); const parts = t.split("."); parts[2] = parts[2].slice(0, -4) + "AAAA";
+  assert.equal((await lister(parts.join("."))).status, 403);
+  const ok = await (await lister(t)).json(); assert.equal(ok.commandes.length, 1); assert.ok(ok.commandes[0].lien.includes("#merci"));
+  const fait = b => W.fetch(new Request("https://x/api/envois/fait", { method: "POST", headers: { Authorization: "Bearer " + t }, body: JSON.stringify({ id: c.id }) }), e, ctx);
+  assert.equal((await (await fait()).json()).ok, true); assert.equal((await (await fait()).json()).ok, false);
+  assert.equal((await (await lister(t)).json()).commandes.length, 0);
+  globalThis.fetch = avant;
+});

@@ -245,6 +245,42 @@ async function envoyerEmail(env, c) {
   return true;
 }
 
+
+/* ---------- Envoi des e-mails de livraison par Google Apps Script (Gmail du propriétaire) ----------
+   Aucun secret partagé : le script présente un jeton d'identité signé par Google ; on vérifie la signature
+   (clés publiques Google), l'émetteur, l'expiration et l'adresse autorisée (variable EMAIL_EXPEDITEUR). */
+const b64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+async function identiteGoogle(req, env) {
+  const m = (req.headers.get("Authorization") || "").match(/^Bearer ([\w-]+)\.([\w-]+)\.([\w-]+)$/);
+  if (!m || !env.EMAIL_EXPEDITEUR) return false;
+  let tete, corps; try { tete = JSON.parse(new TextDecoder().decode(b64u(m[1]))); corps = JSON.parse(new TextDecoder().decode(b64u(m[2]))); } catch (e) { return false; }
+  if (tete.alg !== "RS256" || !["accounts.google.com", "https://accounts.google.com"].includes(corps.iss)) return false;
+  if (!(corps.exp * 1000 > Date.now()) || corps.email_verified !== true && corps.email_verified !== "true") return false;
+  if (String(corps.email).toLowerCase() !== env.EMAIL_EXPEDITEUR.toLowerCase()) return false;
+  const jwks = await (await fetch("https://www.googleapis.com/oauth2/v3/certs", { cf: { cacheTtl: 3600 } })).json();
+  const jwk = (jwks.keys || []).find(k => k.kid === tete.kid); if (!jwk) return false;
+  const cle = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  return crypto.subtle.verify("RSASSA-PKCS1-v1_5", cle, b64u(m[3]), enc.encode(m[1] + "." + m[2]));
+}
+async function envoisEnAttente(req, env) {
+  if (!(await identiteGoogle(req, env))) return json({ erreur: "Accès refusé" }, 403);
+  const r = await env.DB.prepare("SELECT * FROM commandes WHERE etat='payee' AND email_envoye_le IS NULL AND payee_le>? ORDER BY payee_le ASC LIMIT 20").bind(Date.now() - 30 * 86400000).all();
+  const liste = [];
+  for (const c of r.results || []) {
+    const a = await acces(env, c.id);
+    liste.push({ id: c.id, ref: c.id.slice(0, 8).toUpperCase(), nom: c.nom, email: c.email, offre: c.titre, montant: c.montant,
+      livres: JSON.parse(c.livres).map(i => LIVRES[i].t), lien: `${env.FRONTEND_ORIGIN}/?commande=${c.id}&acces=${a}#merci` });
+  }
+  return json({ commandes: liste });
+}
+async function envoiFait(req, env) {
+  if (!(await identiteGoogle(req, env))) return json({ erreur: "Accès refusé" }, 403);
+  const b = await req.json().catch(() => ({}));
+  if (!uuidOk(b.id)) return json({ erreur: "Commande invalide" }, 400);
+  const r = await env.DB.prepare("UPDATE commandes SET email_envoye_le=? WHERE id=? AND etat='payee' AND email_envoye_le IS NULL").bind(Date.now(), b.id).run();
+  return json({ ok: (r.meta && r.meta.changes) > 0 });
+}
+
 /* ---------- Import privé des PDF depuis Google Drive (ouvert seulement pendant l'installation) ---------- */
 async function importer(env, livre) {
   if (env.IMPORT_OUVERT !== "oui") return json({ erreur: "fermé" }, 404);
@@ -269,7 +305,7 @@ async function sante(env) {
   let db = false, kv = false, pdf = 0;
   try { await env.DB.prepare("SELECT 1").first(); db = true; } catch (e) {}
   try { pdf = (await env.LIVRES.list({ prefix: "pdf/" })).keys.length; kv = true; } catch (e) {}
-  return json({ service: "Providence — paiement SasPay", saspay: modeSaspay(env), webhook: !!(await secretWebhook(env)), base: db, stockage: kv, pdf, email: !!env.BREVO_API_KEY, paiementOuvert: env.PAIEMENT_OUVERT === "oui" });
+  return json({ service: "Providence — paiement SasPay", saspay: modeSaspay(env), webhook: !!(await secretWebhook(env)), base: db, stockage: kv, pdf, email: !!env.BREVO_API_KEY || !!env.EMAIL_EXPEDITEUR, paiementOuvert: env.PAIEMENT_OUVERT === "oui" });
 }
 
 export default {
@@ -286,6 +322,8 @@ export default {
       else if (p.startsWith("/api/installation/importer/") && req.method === "POST") r = await importer(env, p.slice(27));
       else if (p === "/api/installation/inventaire" && req.method === "GET") r = await inventaire(env);
       else if (p === "/api/installation/secret-webhook" && req.method === "GET") r = await pageSecretWebhook(env);
+      else if (p === "/api/envois" && req.method === "GET") r = await envoisEnAttente(req, env);
+      else if (p === "/api/envois/fait" && req.method === "POST") r = await envoiFait(req, env);
       else r = json({ erreur: "Introuvable" }, 404);
     } catch (e) { r = json({ erreur: "Service momentanément indisponible" }, 503); }
     const h = new Headers(r.headers); for (const [k, v] of Object.entries(cors(req, env))) h.set(k, v);
