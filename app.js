@@ -667,6 +667,7 @@ function majAssistant(defiler) {
   if (defiler && r.firstElementChild) r.scrollIntoView({ block: "start", behavior: reduit.matches ? "auto" : "smooth" });
 }
 document.addEventListener("submit", e => {
+  if (e.target.classList.contains("achat-form")) { e.preventDefault(); envoyerAchat(e.target); return; }
   if (e.target.id !== "aide-form") return;
   e.preventDefault(); chargerLexique();
   const q = $("#aide-q"); texteAssistant = q ? q.value : ""; besoinChoisi = "";
@@ -911,7 +912,10 @@ function pageCommande() {
       </div>
       <div class="panneau reglement">
         <h2>Règlement sécurisé</h2>
-        ${liens
+        ${saspayActif() && !panier.collection && offreSaspay("panier", a.map(l => l.id))
+          ? `<p class="aide-reglement">Réglez ${a.length > 1 ? "vos " + a.length + " livres en une seule fois" : "votre livre"} sur la page de paiement sécurisée ; ${a.length > 1 ? "ils vous sont remis" : "il vous est remis"} aussitôt le règlement confirmé.</p>
+          <button class="btn btn-principal btn-large" type="button" data-saspay-panier>Acquérir${a.length > 1 ? " les " + a.length + " livres" : ""}${t ? " — " + px(t) : ""}</button>`
+          : liens
           ? `<p class="aide-reglement">${liens.length > 1 ? "Chaque livre se règle sur sa page de paiement sécurisée. Touchez « Acquérir » pour chacun d'eux." : "Touchez « Acquérir » : la page de paiement sécurisée s'ouvre."}</p>
           <div class="paiements">${liens.map((x, i) => `<div class="paiement-livre"><div><b>${esc(x.titre)}</b>${x.prix ? `<small class="num">${px(x.prix)}</small>` : ""}<span class="statut-ligne" aria-live="polite"></span></div><button class="btn btn-principal btn-petit" type="button" data-regler="${i}">Acquérir<span class="sr"> ${esc(x.titre)}</span></button></div>`).join("")}</div>`
           : `<div class="info">${IC.info}<span>La collection complète sera très prochainement proposée en un seul règlement sécurisé. Pour la recevoir dès maintenant, écrivez à l'auteur sur WhatsApp.</span></div>
@@ -1019,9 +1023,9 @@ function router() {
   let html, nav = h, livre = null;
   if (h.startsWith("livre-")) { livre = LIVRES.find(x => x.slug === h.slice(6)); nav = "catalogue"; html = livre ? pageLivre(livre) : pageCatalogue(); }
   else if (h === "parcours") { html = pageAccueil(); nav = "accueil"; }
-  else html = ({ catalogue: pageCatalogue, commande: pageCommande, auteur: pageAuteur, aide: pageAide, videos: pageVideos, confirmation: pageCommande, contact: pageContact, editeur: pageEditeur, conditions: pageConditions, mentions: pageMentions, livraison: pageLivraison, confidentialite: pageConfidentialite }[h] || pageAccueil)();
+  else html = ({ catalogue: pageCatalogue, commande: pageCommande, auteur: pageAuteur, aide: pageAide, videos: pageVideos, confirmation: pageCommande, contact: pageContact, editeur: pageEditeur, conditions: pageConditions, mentions: pageMentions, livraison: pageLivraison, confidentialite: pageConfidentialite, merci: pageMerci }[h] || pageAccueil)();
   if (nav === "confirmation") nav = "commande";
-  if (!["accueil","catalogue","commande","auteur","aide","videos","editeur","contact"].includes(nav)) nav = ["conditions","livraison","confidentialite"].includes(nav) ? "aide" : "accueil";
+  if (!["accueil","catalogue","commande","auteur","aide","videos","editeur","contact"].includes(nav)) nav = ["conditions","livraison","confidentialite"].includes(nav) ? "aide" : nav === "merci" ? "commande" : "accueil";
   const lect = document.getElementById("lecteur");
   if (lect && lect.open) { const v = lect.querySelector("video"); if (v) v.pause(); try { lect.close(); } catch (err) { lect.removeAttribute("open"); } }
   vue.innerHTML = html;
@@ -1035,6 +1039,7 @@ function router() {
   else if (!reduit.matches) { document.documentElement.classList.add("entree"); setTimeout(() => document.documentElement.classList.remove("entree"), 1400); }
   router.fait = true;
   observer();
+  if (h === "merci") suivreMerci(0);
 }
 let io = null;
 function observer() {
@@ -1060,6 +1065,7 @@ function allerCollections() {
   if (location.hash === "#catalogue") aller(); else { location.hash = "catalogue"; setTimeout(aller, 350); }
 }
 function procurer(id) {
+  if (saspayActif() && id !== "collection" && ouvrirAchat(offreSaspay(id))) return;
   const lot = (CFG.vente.lots || []).find(L => L.id === id);
   if (lot) {
     if (enLigneActif() && lot.lien && ouvrir(lot.lien, "paiement-" + lot.id)) { toast("Ouverture de la page de paiement sécurisée"); return; }
@@ -1074,6 +1080,92 @@ function procurer(id) {
   const l = LIVRES.find(x => x.id === id); if (!l) return;
   if (enLigneActif() && ouvrir(l.lienPaiement, "paiement-livre")) { mesure("debut_achat", { livre: id }); toast("Ouverture de la page de paiement sécurisée"); return; }
   if (ajouter(id)) location.hash = "commande";
+}
+
+/* ---------- Paiement direct SasPay (interrupteur : CFG.vente.saspay.actif) ----------
+   Nom et e-mail sont demandés ici, sur la boutique ; le paiement s'ouvre ensuite dans le même onglet
+   sur la page sécurisée SasPay. La livraison n'a lieu qu'après vérification par notre serveur. */
+function saspayActif() {
+  const s = CFG.vente.saspay || {};
+  if (!/^https:\/\//.test(s.api || "")) return false;
+  if (s.actif) return true;
+  try { if (/[?&]saspay=essai\b/.test(location.search)) sessionStorage.setItem("pep-saspay", "1"); return sessionStorage.getItem("pep-saspay") === "1"; } catch (e) { return false; }
+}
+const API_SASPAY = () => (CFG.vente.saspay || {}).api.replace(/\/$/, "");
+function offreSaspay(id, ids) {
+  const lc = lotsCalcules().lots.find(L => L.id === id);
+  if (lc) return { offre: id, titre: lc.nom, detail: lc.livres.length + " ouvrages", montant: lc.prix, couv: lc.livres[0] };
+  if (id === "panier") { const a = (ids || []).map(i => LIVRES.find(l => l.id === i)).filter(l => l && l.prix); if (!a.length) return null;
+    return a.length === 1 ? offreSaspay(a[0].id) : { offre: "panier", ids: a.map(l => l.id), titre: a.length + " ouvrages", detail: a.map(l => l.titre).join(" · "), montant: a.reduce((s, l) => s + l.prix, 0), couv: a[0] }; }
+  const l = LIVRES.find(x => x.id === id); if (!l || !l.prix) return null;
+  return { offre: l.id, titre: l.titre, detail: "Livre numérique PDF", montant: l.prix, couv: l };
+}
+function ouvrirAchat(o) {
+  const d = $("#achat"); if (!d || !o) return false;
+  let m = {}; try { m = JSON.parse(localStorage.getItem("pep-acheteur") || "{}"); } catch (e) {}
+  $(".achat-corps", d).innerHTML = `<form class="achat-form" novalidate data-offre='${esc(JSON.stringify({ offre: o.offre, ids: o.ids }))}'>
+    <span class="pastille-info"><i></i>Acquisition</span>
+    <h2>Recevoir <span class="b">mon ouvrage</span></h2>
+    <div class="achat-recap"><img src="${mini(o.couv)}" alt="" width="52" height="74"><div><b>${esc(o.titre)}</b><small>${esc(o.detail)}</small></div><span class="num">${px(o.montant)}</span></div>
+    <label class="champ"><span>Votre nom</span><input name="nom" autocomplete="name" required minlength="2" maxlength="100" value="${esc(m.nom || "")}"></label>
+    <label class="champ"><span>Votre adresse e-mail</span><input name="email" type="email" inputmode="email" autocomplete="email" required maxlength="254" value="${esc(m.email || "")}"></label>
+    <p class="achat-note">Vos livres vous seront remis sur la page de confirmation et envoyés à cette adresse.</p>
+    <p class="achat-erreur" role="alert" aria-live="assertive"></p>
+    <button class="btn btn-principal btn-large" type="submit">Continuer vers le paiement sécurisé</button>
+    <ul class="garanties"><li>Mobile Money ou carte bancaire, en FCFA</li><li>Page de paiement sécurisée SasPay</li></ul>
+  </form>`;
+  try { d.showModal(); } catch (e) { d.setAttribute("open", ""); }
+  const champ = $(m.nom ? (m.email ? "button[type=submit]" : "input[name=email]") : "input[name=nom]", d); champ && champ.focus();
+  mesure("debut_achat", { offre: o.offre, canal: "saspay" });
+  return true;
+}
+async function envoyerAchat(f) {
+  const b = $("button[type=submit]", f), err = $(".achat-erreur", f);
+  if (b.getAttribute("aria-busy") === "true") return;
+  const nom = f.nom.value.trim(), email = f.email.value.trim();
+  err.textContent = "";
+  if (nom.length < 2) { err.textContent = "Indiquez votre nom."; f.nom.focus(); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { err.textContent = "Vérifiez votre adresse e-mail."; f.email.focus(); return; }
+  try { localStorage.setItem("pep-acheteur", JSON.stringify({ nom, email })); } catch (e) {}
+  b.setAttribute("aria-busy", "true"); const t0 = b.textContent; b.textContent = "Ouverture du paiement sécurisé…";
+  try {
+    const r = await fetch(API_SASPAY() + "/api/paiement", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...JSON.parse(f.dataset.offre), nom, email }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && /^https:\/\//.test(j.url || "")) { mesure("sortie", { canal: "saspay" }); location.assign(j.url); return; }
+    err.textContent = j.erreur || "Le paiement n'a pas pu s'ouvrir. Réessayez dans un instant.";
+  } catch (e) { err.textContent = "Connexion impossible. Vérifiez votre réseau, puis réessayez."; }
+  b.removeAttribute("aria-busy"); b.textContent = t0;
+}
+/* Page de remise des livres (retour de SasPay) : l'état vient du serveur, jamais de l'adresse. */
+function paramsCommande() { const p = new URLSearchParams(location.search); const c = p.get("commande"), a = p.get("acces"); return /^[0-9a-f-]{36}$/i.test(c || "") && /^[a-f0-9]{64}$/.test(a || "") ? { c, a } : null; }
+function pageMerci() {
+  return `<section class="commande"><div class="wrap" style="max-width:760px">
+    <ol class="etat-parcours" aria-label="Étapes"><li>Choix des livres</li><li>Règlement sécurisé</li><li aria-current="step">Remise du PDF</li></ol>
+    <div class="panneau merci" id="merci" aria-live="polite">${paramsCommande() ? `<div class="merci-attente"><span class="roue" aria-hidden="true"></span><h1 tabindex="-1">Paiement en cours de vérification</h1><p>Nous confirmons votre règlement auprès de SasPay. Cela prend généralement quelques secondes.</p></div>`
+      : `<h1 tabindex="-1">Lien incomplet</h1><p>Ouvrez le lien reçu par e-mail, ou écrivez-nous : nous vous renverrons vos livres.</p>${assistance("je n'arrive pas à récupérer mes livres après paiement.")}`}</div>
+  </div></section>`;
+}
+let suiviMerci = 0;
+async function suivreMerci(essai) {
+  const p = paramsCommande(), z = $("#merci"); if (!p || !z || location.hash !== "#merci") return;
+  clearTimeout(suiviMerci);
+  let j = null;
+  try { const r = await fetch(`${API_SASPAY()}/api/commande?commande=${encodeURIComponent(p.c)}&acces=${p.a}`); j = await r.json(); if (!r.ok) j = { etat: "refus", erreur: j.erreur }; } catch (e) { j = { etat: "reseau" }; }
+  if (!$("#merci")) return;
+  if (j.etat === "payee") {
+    mesure("achat_confirme", { offre: j.titre });
+    z.innerHTML = `<span class="pastille-info"><i></i>Paiement confirmé</span>
+      <h1 tabindex="-1">Merci. Vos ouvrages <span class="b">vous attendent</span></h1>
+      <p class="chapeau">${esc(j.titre)} — référence ${esc(p.c.slice(0, 8).toUpperCase())}</p>
+      <div class="merci-livres">${j.livres.map(x => { const l = LIVRES.find(b => b.id === x.id); return `<div class="art"><img src="${l ? mini(l) : ""}" alt="" width="52" height="74"><div><b>${esc(x.titre)}</b><small>PDF</small></div><a class="btn btn-principal btn-petit" href="${esc(x.url)}" download>Télécharger mon livre</a></div>`; }).join("")}</div>
+      <div class="info">${IC.info}<span>${j.emailEnvoye ? `Un e-mail avec vos liens a été envoyé à ${esc(j.email)}.` : "Gardez cette page dans vos favoris : son adresse vous permet de retélécharger vos livres à tout moment."}</span></div>
+      ${assistance("j'ai une question au sujet de ma commande " + p.c.slice(0, 8).toUpperCase() + ".")}`;
+    return;
+  }
+  if (j.etat === "refus" || j.etat === "abandonnee") { z.innerHTML = `<h1 tabindex="-1">Commande introuvable</h1><p>${esc(j.erreur || "Ce paiement n'a pas abouti.")} Aucun montant n'est perçu sans paiement confirmé.</p><a class="btn btn-principal" href="#catalogue">Revenir à la librairie</a>${assistance("ma commande " + p.c.slice(0, 8).toUpperCase() + " n'apparaît pas.")}`; return; }
+  const n = (essai || 0) + 1;
+  if (n > 60) { z.innerHTML = `<h1 tabindex="-1">Paiement non confirmé pour l'instant</h1><p>Si vous avez réglé, la confirmation peut prendre quelques minutes : revenez sur cette page plus tard, vos livres y seront. Aucun livre n'est remis sans paiement confirmé.</p><button class="btn btn-principal" type="button" data-reverifier>Vérifier à nouveau</button>${assistance("j'ai payé la commande " + p.c.slice(0, 8).toUpperCase() + " mais je n'ai pas encore mes livres.")}`; return; }
+  suiviMerci = setTimeout(() => suivreMerci(n), n < 10 ? 3000 : 6000);
 }
 
 /* ---------- Actions ---------- */
@@ -1115,6 +1207,9 @@ document.addEventListener("click", e => {
   if (e.target.closest("[data-fermer-lecteur]") || e.target.id === "lecteur") { const d = $("#lecteur"); const v = $("video", d); if (v) v.pause(); try { d.close(); } catch (err) { d.removeAttribute("open"); } return; }
   const rv = e.target.closest("[data-revoir]");
   if (rv) { const c = rv.closest(".video-cadre"), v = c && $("video", c); if (v) { c.classList.remove("fini"); v.currentTime = 0; v.play().catch(() => {}); } return; }
+  if (e.target.closest("[data-saspay-panier]")) { ouvrirAchat(offreSaspay("panier", articles().map(l => l.id))); return; }
+  if (e.target.closest("[data-fermer-achat]") || e.target.id === "achat") { const d = $("#achat"); try { d.close(); } catch (err) { d.removeAttribute("open"); } return; }
+  if (e.target.closest("[data-reverifier]")) { const z = $("#merci"); if (z) z.innerHTML = `<div class="merci-attente"><span class="roue" aria-hidden="true"></span><h1 tabindex="-1">Vérification en cours…</h1></div>`; suivreMerci(0); return; }
   const rg = e.target.closest("[data-regler]");
   if (rg) {
     const L = liensPaiement(), x = L && L[+rg.dataset.regler];

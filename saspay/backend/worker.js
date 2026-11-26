@@ -168,13 +168,30 @@ async function creerPaiement(req, env) {
   return json({ url: u.toString(), commande: id });
 }
 
+/* Secret de signature du webhook : variable Cloudflare SASPAY_WEBHOOK_SECRET, sinon valeur créée une seule fois
+   par la page d'installation et conservée dans le KV privé (le propriétaire la recopie dans SasPay). */
+async function secretWebhook(env) { return env.SASPAY_WEBHOOK_SECRET || await env.LIVRES.get("config/secret-webhook"); }
+async function pageSecretWebhook(env) {
+  if (env.CONFIG_WEBHOOK !== "oui") return json({ erreur: "fermé" }, 404);
+  if (await env.LIVRES.get("config/secret-webhook")) return new Response("<!doctype html><meta charset=utf-8><body style='font-family:sans-serif;padding:30px'>Le secret a déjà été créé et affiché une seule fois.", { status: 410, headers: { ...ENTETES, "Content-Type": "text/html; charset=utf-8" } });
+  const r = new Uint8Array(32); crypto.getRandomValues(r); const v = "whsec_" + hex(r);
+  await env.LIVRES.put("config/secret-webhook", v);
+  return new Response(`<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Secret du webhook</title>
+<body style="font-family:'Plus Jakarta Sans',Arial,sans-serif;background:#F3F8FF;color:#12243A;padding:24px"><div style="max-width:620px;margin:auto;background:#fff;border:1px solid #D7E4F2;border-radius:20px;padding:26px">
+<p style="font-weight:800;color:#1450D2;font-size:12px;letter-spacing:.06em">PROVIDENCE ÉDITIONS PRESTIGE</p><h1 style="font-size:22px">Secret de signature du webhook</h1>
+<p>Affiché <b>une seule fois</b>. Copiez-le, puis collez-le dans SasPay, champ « Secret de signature ».</p>
+<input id="s" readonly value="${v}" style="width:100%;font:15px monospace;padding:12px;border:1.5px solid #D7E4F2;border-radius:12px">
+<button onclick="navigator.clipboard.writeText(document.getElementById('s').value).then(()=>this.textContent='Copié ✓')" style="margin-top:14px;background:#1450D2;color:#fff;border:0;border-radius:999px;padding:13px 22px;font-weight:700;font-size:15px;cursor:pointer">Copier le secret</button>
+</div>`, { headers: { ...ENTETES, "Content-Type": "text/html; charset=utf-8" } });
+}
 async function webhook(req, env, ctx) {
   const brut = await req.text();
   if (brut.length > 65536) return json({ erreur: "trop long" }, 413);
   const t = req.headers.get("X-Webhook-Timestamp") || "", sig = (req.headers.get("X-Webhook-Signature") || "").toLowerCase();
-  if (!env.SASPAY_WEBHOOK_SECRET || !/^\d{9,11}$/.test(t) || !/^[a-f0-9]{64}$/.test(sig)) return json({ erreur: "signature" }, 401);
+  const secret = await secretWebhook(env);
+  if (!secret || !/^\d{9,11}$/.test(t) || !/^[a-f0-9]{64}$/.test(sig)) return json({ erreur: "signature" }, 401);
   if (Math.abs(Date.now() / 1000 - Number(t)) > 300) return json({ erreur: "horodatage" }, 401);
-  if (!egal(await hmac(env.SASPAY_WEBHOOK_SECRET, t + "." + brut), sig)) return json({ erreur: "signature" }, 401);
+  if (!egal(await hmac(secret, t + "." + brut), sig)) return json({ erreur: "signature" }, 401);
   let e; try { e = JSON.parse(brut); } catch (x) { return json({ erreur: "json" }, 400); }
   const evt = e.event || req.headers.get("X-Webhook-Event");
   await env.DB.prepare("INSERT INTO evenements (recu_le, evenement, ref) VALUES (?,?,?)").bind(Date.now(), String(evt).slice(0, 60), String(e.data && e.data.id || "").slice(0, 80)).run().catch(() => {});
@@ -252,7 +269,7 @@ async function sante(env) {
   let db = false, kv = false, pdf = 0;
   try { await env.DB.prepare("SELECT 1").first(); db = true; } catch (e) {}
   try { pdf = (await env.LIVRES.list({ prefix: "pdf/" })).keys.length; kv = true; } catch (e) {}
-  return json({ service: "Providence — paiement SasPay", saspay: modeSaspay(env), webhook: !!env.SASPAY_WEBHOOK_SECRET, base: db, stockage: kv, pdf, email: !!env.BREVO_API_KEY, paiementOuvert: env.PAIEMENT_OUVERT === "oui" });
+  return json({ service: "Providence — paiement SasPay", saspay: modeSaspay(env), webhook: !!(await secretWebhook(env)), base: db, stockage: kv, pdf, email: !!env.BREVO_API_KEY, paiementOuvert: env.PAIEMENT_OUVERT === "oui" });
 }
 
 export default {
@@ -268,6 +285,7 @@ export default {
       else if (p.startsWith("/api/telecharger/") && req.method === "GET") r = await telecharger(env, p.slice(17), url);
       else if (p.startsWith("/api/installation/importer/") && req.method === "POST") r = await importer(env, p.slice(27));
       else if (p === "/api/installation/inventaire" && req.method === "GET") r = await inventaire(env);
+      else if (p === "/api/installation/secret-webhook" && req.method === "GET") r = await pageSecretWebhook(env);
       else r = json({ erreur: "Introuvable" }, 404);
     } catch (e) { r = json({ erreur: "Service momentanément indisponible" }, 503); }
     const h = new Headers(r.headers); for (const [k, v] of Object.entries(cors(req, env))) h.set(k, v);

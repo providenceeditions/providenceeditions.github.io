@@ -323,6 +323,11 @@
    "totalReference": 83500,
    "arrondi": 500,
    "note": "Prix de l'ensemble des collections. Si le total des prix séparés change (nouveau livre, nouveau prix), le prix d'ensemble suit la même proportion (65 000 / 83 500), puis se répartit entre les collections au prorata. Un livre absent des listes rejoint la dernière collection."
+  },
+  "saspay": {
+   "actif": false,
+   "api": "https://providence-paiement.providence-editions.workers.dev",
+   "note": "Paiement direct SasPay + livraison automatique des PDF. Laisser actif=false tant que le parcours complet n'est pas validé par le propriétaire ; Maketou reste le repli."
   }
  },
  "contacts": [
