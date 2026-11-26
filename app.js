@@ -287,14 +287,26 @@ function bandeVideos() {
   const V = ordreVideos(); if (!V.length) return "";
   return `<section class="bande-videos" aria-labelledby="bv-titre"><div class="wrap">
     <div class="bv-tete"><span class="bv-pastille"><i></i>En vidéo</span><h2 id="bv-titre">Les ouvrages <span class="b">en vidéo</span></h2><a class="bv-tout" href="#videos">Tout voir</a></div>
-    <div class="bv-rail" role="list">${V.map(({ x, i }) => {
+    <div class="bv-rail" role="list" data-defileur="videos" data-sens="-1" data-vitesse="24">${V.map(({ x, i }) => {
       const coll = x.livre === "collection", l = coll ? null : LIVRES.find(b => b.slug === x.livre);
       if (!coll && !l) return "";
-      return `<button class="bv-item" type="button" role="listitem" data-lecture="${i}" aria-label="Regarder : ${esc((coll ? "La collection complète" : l.titre) + " — " + x.type)}">
+      return `<button class="bv-item" type="button" role="listitem" draggable="false" data-lecture="${i}" aria-label="Regarder : ${esc((coll ? "La collection complète" : l.titre) + " — " + x.type)}">
         <span class="bv-image"><img src="${esc(afficheVideo(x))}" alt="" loading="lazy" width="320" height="400"><span class="bv-play" aria-hidden="true">${IC_LECTURE}</span><span class="bv-type">${esc(x.type)}</span></span>
         <span class="bv-nom">${esc(coll ? "La collection complète" : l.titre)}</span>
       </button>`;
     }).join("")}</div>
+  </div></section>`;
+}
+/* Bande d'ouvrages : couvertures en défilement continu, ouverture de la fiche au toucher */
+function bandeOuvrages() {
+  return `<section class="bande-ouvrages" aria-labelledby="bo-titre"><div class="wrap">
+    <div class="bv-tete"><span class="bv-pastille bo-pastille"><i></i>La librairie</span><h2 id="bo-titre">Les ouvrages <span class="b">à découvrir</span></h2><a class="bv-tout" href="#catalogue">Tout le catalogue</a></div>
+    <div class="bo-rail" role="list" data-defileur="ouvrages" data-sens="1" data-vitesse="30">${LIVRES.map(l => `<a class="bo-item" role="listitem" href="#livre-${l.slug}" draggable="false">
+        <span class="bo-couv"><img src="${mini(l)}" alt="" loading="lazy" width="420" height="595" draggable="false">${(CFG.vente.videos || []).some(v => v.livre === l.slug && v.fichier) ? `<span class="badge-carte-video">${IC_LECTURE}Vidéo</span>` : ""}</span>
+        <span class="bo-theme">${esc(l.theme)}</span>
+        <span class="bo-nom">${esc(l.titre)}</span>
+        ${l.prix ? `<span class="bo-prix num">${px(l.prix)}</span>` : ""}
+      </a>`).join("")}</div>
   </div></section>`;
 }
 /* Vidéo de la collection : accès aux ouvrages un par un (sans l'offre groupée) */
@@ -404,11 +416,6 @@ function pageAccueil() {
         <a class="btn btn-principal btn-eclat" href="#tous-les-ouvrages" data-defile="tous-les-ouvrages">Découvrir la collection</a>
         <a class="btn btn-capsule" href="#parcours" data-defile="parcours">Comment acquérir un livre</a>
       </div>
-      <figure class="mot-bienvenue" data-enter="4">
-        <span class="mb-sur">Mot de bienvenue</span>
-        <blockquote>Bien-aimé, soyez le bienvenu. Ces livres sont nés de l'étude de la Parole et de la prière. Je vous les remets pour que vous grandissiez dans la connaissance de Dieu et que vous serviez avec intelligence. Prenez le temps de parcourir la librairie et choisissez l'ouvrage qui répond à votre besoin.</blockquote>
-        <figcaption><img src="${esc(A.photoBuste)}" alt="" width="54" height="54"><span><b>Docteur B. Silas Gbavou</b>Enseignant de la Parole de Dieu et scribe prophétique</span></figcaption>
-      </figure>
     </div>
     <div class="vitrine" aria-hidden="true"><div class="vt-lumiere"></div>
       <div class="vt-scene">
@@ -428,6 +435,7 @@ function pageAccueil() {
     </div>
   </div></section>
 
+  ${bandeOuvrages()}
   ${bandeVideos()}
 
   <section style="padding-top:clamp(28px,4vw,48px)"><div class="wrap">
@@ -563,7 +571,7 @@ const PROFILS = [
 ];
 let besoinChoisi = "", texteAssistant = "", LEXIQUE = null;
 let lexiqueEnCours = null;
-const chargerLexique = () => lexiqueEnCours || (lexiqueEnCours = fetch("data/concepts.json?v=20261121k").then(r => r.json()).then(d => { LEXIQUE = d; if (texteAssistant.trim()) majAssistant(false); }).catch(() => { lexiqueEnCours = null; }));
+const chargerLexique = () => lexiqueEnCours || (lexiqueEnCours = fetch("data/concepts.json?v=20261126a").then(r => r.json()).then(d => { LEXIQUE = d; if (texteAssistant.trim()) majAssistant(false); }).catch(() => { lexiqueEnCours = null; }));
 /* Propositions affichées : une sélection différente à chaque visite. */
 const PROPOSITIONS = (() => { const a = BESOINS.map(b => b.id); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a.slice(0, 8); })();
 const prep = t => " " + normal(t || "").replace(/[’'ʼ]/g, " ").replace(/[^a-z0-9-]+/g, " ").replace(/\s+/g, " ") + " ";
@@ -1035,6 +1043,7 @@ function router() {
   else if (!reduit.matches) { document.documentElement.classList.add("entree"); setTimeout(() => document.documentElement.classList.remove("entree"), 1400); }
   router.fait = true;
   observer();
+  defileurs();
 }
 let io = null;
 function observer() {
@@ -1075,6 +1084,109 @@ function procurer(id) {
   if (enLigneActif() && ouvrir(l.lienPaiement, "paiement-livre")) { mesure("debut_achat", { livre: id }); toast("Ouverture de la page de paiement sécurisée"); return; }
   if (ajouter(id)) location.hash = "commande";
 }
+
+/* ---------- Défilement continu des bandes (ouvrages, vidéos) ----------
+   Le défilement est natif (doigt, souris, molette, clavier) ; l'animation avance la position
+   au rythme du temps réellement écoulé (requestAnimationFrame) et s'efface dès que le visiteur
+   agit. Boucle sans fin : des copies décoratives (aria-hidden, hors tabulation) entourent la
+   liste ; la position est ramenée d'un cycle exact quand c'est invisible. */
+const DEF_POS = {};
+let DEF = [], defRAF = 0, defT = 0, videoEnCours = false;
+
+function defileurs() {
+  DEF.forEach(d => d.detruire()); DEF = [];
+  if (reduit.matches) return;
+  $$("[data-defileur]", vue).forEach(el => { const d = creerDefileur(el); if (d) DEF.push(d); });
+  if (DEF.length && !defRAF) { defT = 0; defRAF = requestAnimationFrame(defBoucle); }
+}
+function creerDefileur(el) {
+  const originaux = [...el.children];
+  if (originaux.length < 3) return null;
+  const d = { el, nom: el.dataset.defileur, sens: +el.dataset.sens || 1, vitesse: +el.dataset.vitesse || 28,
+    U: 0, base: 0, m: 0, survolT: 0, pos: 0, ecrit: -1, f: 0, visible: true, survol: false, focus: false, appui: false, dernier: -1e9, glisse: null };
+  el.classList.add("defileur");
+  const copie = it => { const c = it.cloneNode(true); c.setAttribute("aria-hidden", "true"); c.setAttribute("data-copie", ""); c.removeAttribute("role");
+    c.tabIndex = -1; $$("a,button,[tabindex]", c).forEach(x => { x.tabIndex = -1; }); return c; };
+  const mesurer = () => {
+    const cw = el.clientWidth; if (!cw) return false;
+    const g = parseFloat(getComputedStyle(el).columnGap) || 0;
+    const a = originaux[0], z = originaux[originaux.length - 1];
+    const U = (z.offsetLeft + z.offsetWidth + g) - a.offsetLeft;
+    if (U <= 0) return false;
+    const m = Math.ceil(cw / U) + 1;
+    if (m !== d.m) {
+      $$("[data-copie]", el).forEach(x => x.remove());
+      const avant = document.createDocumentFragment(), apres = document.createDocumentFragment();
+      for (let k = 0; k < m; k++) originaux.forEach(it => { avant.appendChild(copie(it)); apres.appendChild(copie(it)); });
+      el.insertBefore(avant, originaux[0]); el.appendChild(apres); d.m = m;
+    }
+    const decal = d.U ? (((d.pos - d.base) % d.U) + d.U) % d.U : (DEF_POS[d.nom] || 0);
+    d.U = U; d.base = originaux[0].offsetLeft - el.firstElementChild.offsetLeft;
+    d.pos = d.base + (decal % U); el.scrollLeft = d.pos; d.ecrit = el.scrollLeft;
+    return true;
+  };
+  const maintenant = () => performance.now();
+  const ev = [];
+  const on = (cible, type, fn, opt) => { cible.addEventListener(type, fn, opt); ev.push([cible, type, fn, opt]); };
+  on(el, "scroll", () => { if (Math.abs(el.scrollLeft - d.ecrit) > 1.5) { d.pos = el.scrollLeft; d.ecrit = el.scrollLeft; d.dernier = maintenant(); } }, { passive: true });
+  on(el, "wheel", () => { d.dernier = maintenant(); }, { passive: true });
+  /* Survol à la souris : pause tant que le curseur bouge sur la bande ; un curseur immobile
+     (par exemple au retour d'une fiche) laisse la bande repartir d'elle-même. */
+  on(el, "pointerenter", e => { if (e.pointerType === "mouse") { d.survol = true; d.survolT = maintenant(); } });
+  on(el, "pointermove", e => { if (e.pointerType === "mouse") { d.survol = true; d.survolT = maintenant(); } }, { passive: true });
+  on(el, "pointerleave", e => { if (e.pointerType === "mouse") { d.survol = false; d.dernier = maintenant(); } });
+  /* Pause au focus clavier seulement (un toucher ou un clic ne doit pas figer la bande). */
+  on(el, "focusin", e => { let v = false; try { v = e.target.matches(":focus-visible"); } catch (er) {} d.focus = v; });
+  on(el, "focusout", e => { if (!el.contains(e.relatedTarget)) { d.focus = false; d.dernier = maintenant(); } });
+  /* Doigt : défilement natif du navigateur ; l'animation cède la main pendant le geste. */
+  on(el, "pointerdown", e => {
+    d.appui = true; d.dernier = maintenant();
+    if (e.pointerType === "mouse" && e.button === 0) d.glisse = { x: e.clientX, s: el.scrollLeft, bouge: false, id: e.pointerId };
+  });
+  /* Souris : glisser-déposer horizontal sur ordinateur, sans déclencher de clic involontaire. */
+  on(el, "pointermove", e => {
+    const g = d.glisse; if (!g || e.pointerId !== g.id) return;
+    const dx = e.clientX - g.x;
+    if (!g.bouge && Math.abs(dx) > 6) { g.bouge = true; el.classList.add("glisse"); try { el.setPointerCapture(e.pointerId); } catch (er) {} }
+    if (g.bouge) { el.scrollLeft = g.s - dx; d.pos = el.scrollLeft; d.ecrit = el.scrollLeft; d.dernier = maintenant(); }
+  });
+  const fin = () => { d.appui = false; d.dernier = maintenant(); if (d.glisse) { const b = d.glisse.bouge; d.glisse = null; el.classList.remove("glisse"); if (b) d.annulerClic = maintenant(); } };
+  on(el, "pointerup", fin); on(el, "pointercancel", fin); on(el, "lostpointercapture", fin);
+  on(el, "click", e => { if (d.annulerClic && maintenant() - d.annulerClic < 400) { e.preventDefault(); e.stopPropagation(); d.annulerClic = 0; return; }
+    if (e.target.closest("a,button")) DEF_POS[d.nom] = (((d.pos - d.base) % d.U) + d.U) % d.U; }, true);
+  on(el, "dragstart", e => e.preventDefault());
+  const vis = "IntersectionObserver" in window ? new IntersectionObserver(es => es.forEach(x => { d.visible = x.isIntersecting; })) : null;
+  vis && vis.observe(el);
+  const ro = "ResizeObserver" in window ? new ResizeObserver(() => { if (d.U) mesurer(); }) : null;
+  ro && ro.observe(el);
+  d.detruire = () => { ev.forEach(([c, t, f, o]) => c.removeEventListener(t, f, o)); vis && vis.disconnect(); ro && ro.disconnect(); };
+  d.mesurer = mesurer; d.pret = mesurer();
+  return d;
+}
+function defBoucle(t) {
+  if (!DEF.length) { defRAF = 0; return; }
+  defRAF = requestAnimationFrame(defBoucle);
+  const dt = defT ? Math.min(0.05, (t - defT) / 1000) : 0; defT = t;
+  if (document.hidden || !dt) return;
+  const lect = document.getElementById("lecteur"), bloque = videoEnCours || !!(lect && lect.open);
+  for (const d of DEF) {
+    if (!d.pret) { d.pret = d.mesurer(); continue; }
+    const recent = t - d.dernier < 1500;
+    if (d.appui || recent) { d.f = 0; continue; }
+    const libre = !bloque && d.visible && !(d.survol && t - d.survolT < 2500) && !d.focus;
+    d.f += ((libre ? 1 : 0) - d.f) * Math.min(1, dt * (libre ? 1.4 : 7));
+    if (!libre && d.f < 0.003) { d.f = 0; continue; }
+    if (!d.visible) continue;
+    d.pos += d.sens * d.vitesse * d.f * dt;
+    if (d.pos >= d.base + d.U) d.pos -= d.U; else if (d.pos < d.base) d.pos += d.U;
+    d.el.scrollLeft = d.pos; d.ecrit = d.el.scrollLeft;
+    DEF_POS[d.nom] = d.pos - d.base;
+  }
+}
+document.addEventListener("play", e => { if (e.target.tagName === "VIDEO") videoEnCours = true; }, true);
+document.addEventListener("pause", e => { if (e.target.tagName === "VIDEO") videoEnCours = $$("video").some(v => !v.paused && !v.ended); }, true);
+document.addEventListener("ended", e => { if (e.target.tagName === "VIDEO") videoEnCours = $$("video").some(v => !v.paused && !v.ended); }, true);
+reduit.addEventListener && reduit.addEventListener("change", () => { if (router.fait) router(); });
 
 /* ---------- Actions ---------- */
 document.addEventListener("click", e => {
@@ -1163,7 +1275,7 @@ window.addEventListener("scroll", surDefilement, { passive: true }); surDefileme
 
 /* ---------- Chargement ---------- */
 vue.innerHTML = `<p class="chargement">Chargement de la bibliothèque…</p>`;
-Promise.all([fetch("data/livres.json?v=20261121k", { cache: "no-cache" }).then(r => r.json()), fetch("data/config.json?v=20261121k", { cache: "no-cache" }).then(r => r.json())])
+Promise.all([fetch("data/livres.json?v=20261126a", { cache: "no-cache" }).then(r => r.json()), fetch("data/config.json?v=20261126a", { cache: "no-cache" }).then(r => r.json())])
   .then(([l, c]) => {
     /* Tolérance aux fiches saisies depuis la plateforme de gestion */
     const sl = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
