@@ -214,6 +214,20 @@ content:
           - { name: whatsappCommandes, label: WhatsApp des commandes (chiffres seulement), type: string }
           - { name: whatsappAssistance, label: WhatsApp d'assistance (chiffres seulement), type: string }
           - { name: boutiqueMaketou, label: Adresse de la boutique Maketou, type: string }
+          - name: prestataire
+            label: Paiement utilisé sur le site
+            type: select
+            options:
+              values:
+                - { value: saspay, label: "SasPay — paiement direct et remise automatique des livres" }
+                - { value: maketou, label: "Maketou — liens de paiement Maketou" }
+          - name: saspay
+            label: SasPay (technique)
+            type: object
+            hidden: true
+            fields:
+              - { name: api, type: string }
+              - { name: note, type: string }
           - { name: urlSite, label: Adresse du site, type: string }
           - { name: urlCanonique, label: Adresse canonique, type: string, hidden: true }
           - { name: devise, label: Devise, type: string, hidden: true }

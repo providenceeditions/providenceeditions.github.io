@@ -1091,13 +1091,13 @@ function procurer(id) {
   if (ajouter(id)) location.hash = "commande";
 }
 
-/* ---------- Paiement direct SasPay (interrupteur : CFG.vente.saspay.actif) ----------
+/* ---------- Paiement direct SasPay (choix : CFG.vente.prestataire = "saspay" ou "maketou") ----------
    Nom et e-mail sont demandés ici, sur la boutique ; le paiement s'ouvre ensuite dans le même onglet
    sur la page sécurisée SasPay. La livraison n'a lieu qu'après vérification par notre serveur. */
 function saspayActif() {
   const s = CFG.vente.saspay || {};
   if (!/^https:\/\//.test(s.api || "")) return false;
-  if (s.actif) return true;
+  if (CFG.vente.prestataire === "saspay") return true;
   try { if (/[?&]saspay=essai\b/.test(location.search)) sessionStorage.setItem("pep-saspay", "1"); return sessionStorage.getItem("pep-saspay") === "1"; } catch (e) { return false; }
 }
 const API_SASPAY = () => (CFG.vente.saspay || {}).api.replace(/\/$/, "");
